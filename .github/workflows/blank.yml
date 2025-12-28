@@ -1,71 +1,57 @@
-name: Build OpenWrt for HG680-FJ
+name: Build OpenWrt HG680-FJ
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * 5" # Otomatis build setiap hari Jumat
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  TZ: Asia/Jakarta
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
+    - name: Persiapan Environment
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "Asia/Jakarta"
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex g++ gawk gcc-multilib gettext \
+        git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
+        sudo timedatectl set-timezone "${{ env.TZ }}"
 
-    - name: Download source code
+    - name: Clone Source & Update Feeds
       run: |
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    - name: Load custom configuration
-      run: |
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x *.sh
-        ./$DIY_P1_SH
-
-    - name: Update & Install feeds
-      run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
-
-    - name: Build OpenWrt Firmware
+    - name: Build Firmware (Artifact Armvirt)
       run: |
         cd openwrt
+        # Gunakan konfigurasi default untuk armvirt/64
+        echo "CONFIG_TARGET_armvirt=y" > .config
+        echo "CONFIG_TARGET_armvirt_64=y" >> .config
+        echo "CONFIG_TARGET_armvirt_64_Default=y" >> .config
         make defconfig
         make -j$(nproc) || make -j1 V=s
 
-    - name: Package Armvirt to Amlogic (HG680-FJ)
+    - name: Package for Amlogic (HG680-FJ)
       uses: ophub/amlogic-s9xxx-openwrt@main
       with:
         openwrt_path: openwrt/bin/targets/*/*/*.tar.gz
         openwrt_board: s905x
-        openwrt_kernel: 5.15.y
-        # HG680-FJ menggunakan DTB gxl-s905x-p212 atau khusus hg680p
-        # Sesuaikan dengan ketersediaan di script ophub
+        openwrt_kernel: 6.1.y
+        # DTB standar untuk HG680-FJ / S905X
         openwrt_dtb: meson-gxl-s905x-p212
         auto_generate: true
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+    - name: Upload Ke GitHub Artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: OpenWrt_HG680FJ
-        path: ${{ env.PACKAGED_OUTPUTPATH }}
+        name: OpenWrt_HG680FJ_S905X
+        path: ${{ env.PACKAGED_OUTPUTPATH }}/*.img.gz
