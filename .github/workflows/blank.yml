@@ -8,75 +8,72 @@ on:
         required: true
         default: "6.6.119"
       openwrt_target:
-        description: "Target SoC (s905x2)"
+        description: "Target SoC"
         required: true
         default: "s905x2"
 
 env:
   REPO_URL: https://github.com/ophub/amlogic-s9xxx-openwrt
   REPO_BRANCH: main
-  # Menggunakan link rootfs yang lebih stabil (ImmortalWrt 23.05 / 24.10)
-  ROOTFS_URL: https://github.com/ophub/amlogic-s9xxx-openwrt/releases/download/OpenWrt_rootfs/openwrt_armsr_generic_rootfs.tar.gz
+  # Mengarah langsung ke file rootfs tar.gz di server OpenWrt 24.10.5
+  ROOTFS_URL: https://downloads.openwrt.org/releases/24.10.5/targets/armsr/armv8/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Inisialisasi Lingkungan
+    - name: Persiapan Lingkungan
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y git-core git-lfs tree devscripts git-buildpackage pigz curl wget
+        sudo -E apt-get -qq install -y git-core git-lfs tree devscripts git-buildpackage pigz curl wget zstd
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
 
-    - name: Clone Source Code Ophub
+    - name: Clone Ophub Script
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH build_dir
 
-    - name: Download & Verifikasi Rootfs
+    - name: Download Rootfs 24.10.5
       run: |
         mkdir -p build_dir/openwrt-armsr
-        # Menggunakan wget dengan retry agar lebih stabil
-        wget -t 5 -T 30 "${{ env.ROOTFS_URL }}" -O build_dir/openwrt-armsr/openwrt_armsr_generic_rootfs.tar.gz
+        echo "Mendownload rootfs dari server OpenWrt..."
+        wget -t 5 -T 30 "${{ env.ROOTFS_URL }}" -O build_dir/openwrt-armsr/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz
         
-        # Cek apakah file benar-benar file gzip
-        if file build_dir/openwrt-armsr/openwrt_armsr_generic_rootfs.tar.gz | grep -q 'gzip compressed data'; then
-          echo "Rootfs valid (GZIP)."
+        # Verifikasi keberadaan file
+        if [ -f "build_dir/openwrt-armsr/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz" ]; then
+           echo "File berhasil diunduh."
+           ls -lh build_dir/openwrt-armsr/
         else
-          echo "ERROR: File yang didownload rusak atau bukan GZIP!"
-          exit 1
+           echo "Gagal mengunduh file!"
+           exit 1
         fi
 
-    - name: Konfigurasi dan Build Firmware
+    - name: Build Firmware
       id: build_firmware
       run: |
         cd build_dir
         sudo chmod +x remake
-        
-        # Eksekusi build dengan kernel dan target spesifik
-        # Tambahan: sudo -E untuk mempertahankan environment variable
+        # Gunakan sudo -E untuk menjaga environment
         sudo -E ./remake -b "${{ github.event.inputs.openwrt_target }}" -k "${{ github.event.inputs.openwrt_kernel }}"
-        
         echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: Organisasi File Output
-      id: organize
+    - name: Simpan Hasil Build
       if: steps.build_firmware.outputs.status == 'success'
       run: |
-        # Cari file .img.gz secara rekursif jika folder 'out' berbeda
-        OUTPUT_PATH=$(find build_dir/out -name "*.img.gz" -print -quit | xargs dirname)
-        echo "FIRMWARE_PATH=$OUTPUT_PATH" >> $GITHUB_ENV
+        mkdir -p deploy
+        # Cari file .img.gz hasil build dan pindahkan ke folder deploy
+        find build_dir/out -name "*.img.gz" -exec cp {} deploy/ \;
+        echo "FIRMWARE_NAME=$(ls deploy | head -n 1)" >> $GITHUB_ENV
 
-    - name: Upload Artifact Firmware
+    - name: Upload Ke Artifact
       uses: actions/upload-artifact@v4
       if: steps.build_firmware.outputs.status == 'success'
       with:
-        name: OpenWrt_HG680FJ_Kernel_${{ github.event.inputs.openwrt_kernel }}
-        path: ${{ env.FIRMWARE_PATH }}/*.img.gz
-        retention-days: 3
+        name: ${{ env.FIRMWARE_NAME }}
+        path: deploy/*.img.gz
+        retention-days: 7
