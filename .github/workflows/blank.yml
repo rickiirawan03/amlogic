@@ -8,13 +8,9 @@ on:
         required: true
         default: "6.6.119"
       openwrt_target:
-        description: "Target SoC"
+        description: "Target SoC (s905x2)"
         required: true
         default: "s905x2"
-      rootfs_version:
-        description: "Versi Rootfs"
-        required: false
-        default: "latest"
 
 env:
   REPO_URL: https://github.com/ophub/amlogic-s9xxx-openwrt
@@ -29,15 +25,11 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Inisialisasi Lingkungan (Dependencies)
+    - name: Inisialisasi Lingkungan
       run: |
-        # Membersihkan ruang disk agar build tidak penuh
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        
-        # Update dan Install paket yang benar-benar ada
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y git-core git-lfs tree
-        sudo -E apt-get -qq install -y devscripts git-buildpackage
+        sudo -E apt-get -qq install -y git-core git-lfs tree devscripts git-buildpackage pigz
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
 
@@ -45,18 +37,29 @@ jobs:
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH build_dir
 
+    - name: Persiapan Eksekusi Remake
+      run: |
+        cd build_dir
+        # Pastikan file remake ada dan berikan izin eksekusi
+        if [ -f "remake" ]; then
+          sudo chmod +x remake
+          echo "File 'remake' siap digunakan."
+        else
+          echo "ERROR: File 'remake' tidak ditemukan!"
+          ls -R
+          exit 1
+        fi
+
     - name: Konfigurasi dan Build Firmware
       id: build_firmware
       run: |
         cd build_dir
         
-        SOC_TARGET="${{ github.event.inputs.openwrt_target }}"
-        KERNEL_VER="${{ github.event.inputs.openwrt_kernel }}"
-        
-        echo "Memulai build untuk SoC: $SOC_TARGET dengan Kernel: $KERNEL_VER"
-        
-        # Jalankan script make dari Ophub
-        sudo ./make -d -b "$SOC_TARGET" -k "$KERNEL_VER"
+        # Menggunakan ./remake sesuai struktur baru Ophub
+        # -d: Default config
+        # -b: Board (s905x2)
+        # -k: Kernel version
+        sudo ./remake -d -b "${{ github.event.inputs.openwrt_target }}" -k "${{ github.event.inputs.openwrt_kernel }}"
         
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -64,8 +67,14 @@ jobs:
       id: organize
       if: steps.build_firmware.outputs.status == 'success'
       run: |
-        cd build_dir/out
-        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        # Folder output di struktur baru biasanya tetap di 'out'
+        if [ -d "build_dir/out" ]; then
+          cd build_dir/out
+          echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        else
+          echo "Folder out tidak ditemukan, mencoba mencari file .img.gz"
+          find build_dir -name "*.img.gz"
+        fi
 
     - name: Upload Artifact Firmware
       uses: actions/upload-artifact@v4
