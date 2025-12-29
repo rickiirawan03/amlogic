@@ -8,13 +8,15 @@ on:
         required: true
         default: "6.6.119"
       openwrt_target:
-        description: "Target SoC (s905x2)"
+        description: "Target SoC"
         required: true
         default: "s905x2"
 
 env:
   REPO_URL: https://github.com/ophub/amlogic-s9xxx-openwrt
   REPO_BRANCH: main
+  # Ganti link di bawah jika ingin versi OpenWrt yang berbeda
+  ROOTFS_URL: https://github.com/ophub/amlogic-s9xxx-openwrt/releases/download/OpenWrt_rootfs/openwrt_armsr_generic_rootfs.tar.gz
 
 jobs:
   build:
@@ -37,17 +39,23 @@ jobs:
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH build_dir
 
+    - name: Download Rootfs OpenWrt
+      run: |
+        # Buat direktori yang diminta oleh error tadi
+        mkdir -p build_dir/openwrt-armsr
+        
+        # Download rootfs dan simpan dengan nama yang dikenali skrip
+        curl -L $ROOTFS_URL -o build_dir/openwrt-armsr/openwrt_armsr_generic_rootfs.tar.gz
+        
+        echo "Rootfs berhasil diunduh ke build_dir/openwrt-armsr/"
+
     - name: Konfigurasi dan Build Firmware
       id: build_firmware
       run: |
         cd build_dir
         sudo chmod +x remake
         
-        # Penyesuaian parameter remake terbaru:
-        # Kita hapus -d karena menyebabkan error parsing.
-        # Kita gunakan -b (board) dan -k (kernel).
-        # Jika masih gagal, kita bisa menambahkan -s (skip) jika dibutuhkan.
-        
+        # Menjalankan build
         sudo ./remake -b "${{ github.event.inputs.openwrt_target }}" -k "${{ github.event.inputs.openwrt_kernel }}"
         
         echo "status=success" >> $GITHUB_OUTPUT
@@ -56,12 +64,9 @@ jobs:
       id: organize
       if: steps.build_firmware.outputs.status == 'success'
       run: |
-        # Mencari lokasi file hasil build secara dinamis
-        OUTPUT_DIR="build_dir/out"
-        if [ -d "$OUTPUT_DIR" ]; then
-          echo "FIRMWARE_PATH=$OUTPUT_DIR" >> $GITHUB_ENV
+        if [ -d "build_dir/out" ]; then
+          echo "FIRMWARE_PATH=build_dir/out" >> $GITHUB_ENV
         else
-          # Jika folder 'out' tidak ada, cari di folder root build_dir
           echo "FIRMWARE_PATH=build_dir" >> $GITHUB_ENV
         fi
 
@@ -69,6 +74,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.build_firmware.outputs.status == 'success'
       with:
-        name: OpenWrt_HG680FJ_${{ github.event.inputs.openwrt_kernel }}
-        path: ${{ env.FIRMWARE_PATH }}/*.img.gz
+        name: OpenWrt_HG680FJ_Kernel_${{ github.event.inputs.openwrt_kernel }}
+        path: |
+          ${{ env.FIRMWARE_PATH }}/*.img.gz
         retention-days: 3
