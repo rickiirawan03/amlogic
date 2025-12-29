@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       openwrt_kernel:
-        description: "Versi Kernel (Wajib: harus tersedia di repo ophub atau upstream)"
+        description: "Versi Kernel"
         required: true
         default: "6.6.119"
       openwrt_target:
-        description: "Target SoC (HG680FJ menggunakan s905x2)"
+        description: "Target SoC"
         required: true
         default: "s905x2"
       rootfs_version:
-        description: "Versi Rootfs OpenWrt (Contoh: latest, atau versi spesifik)"
+        description: "Versi Rootfs"
         required: false
         default: "latest"
 
@@ -31,9 +31,12 @@ jobs:
 
     - name: Inisialisasi Lingkungan (Dependencies)
       run: |
+        # Membersihkan ruang disk agar build tidak penuh
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        
+        # Update dan Install paket yang benar-benar ada
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y plugin-quic git-core git-lfs tree
+        sudo -E apt-get -qq install -y git-core git-lfs tree
         sudo -E apt-get -qq install -y devscripts git-buildpackage
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
@@ -47,16 +50,12 @@ jobs:
       run: |
         cd build_dir
         
-        # Menyiapkan variabel dari Input Workflow
         SOC_TARGET="${{ github.event.inputs.openwrt_target }}"
         KERNEL_VER="${{ github.event.inputs.openwrt_kernel }}"
         
         echo "Memulai build untuk SoC: $SOC_TARGET dengan Kernel: $KERNEL_VER"
         
         # Jalankan script make dari Ophub
-        # -d: Default config
-        # -b: Board target (s905x2)
-        # -k: Kernel version
         sudo ./make -d -b "$SOC_TARGET" -k "$KERNEL_VER"
         
         echo "status=success" >> $GITHUB_OUTPUT
