@@ -15,7 +15,7 @@ on:
 env:
   REPO_URL: https://github.com/ophub/amlogic-s9xxx-openwrt
   REPO_BRANCH: main
-  # Mengarah langsung ke file rootfs tar.gz di server OpenWrt 24.10.5
+  # Link Rootfs Resmi 24.10.5
   ROOTFS_URL: https://downloads.openwrt.org/releases/24.10.5/targets/armsr/armv8/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz
 
 jobs:
@@ -38,36 +38,43 @@ jobs:
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH build_dir
 
-    - name: Download Rootfs 24.10.5
+    - name: Download & Rename Rootfs
       run: |
         mkdir -p build_dir/openwrt-armsr
-        echo "Mendownload rootfs dari server OpenWrt..."
-        wget -t 5 -T 30 "${{ env.ROOTFS_URL }}" -O build_dir/openwrt-armsr/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz
+        # Download dan beri nama generic agar terbaca oleh skrip remake
+        wget -t 5 -T 30 "${{ env.ROOTFS_URL }}" -O build_dir/openwrt-armsr/openwrt_armsr_generic_rootfs.tar.gz
         
-        # Verifikasi keberadaan file
-        if [ -f "build_dir/openwrt-armsr/openwrt-24.10.5-armsr-armv8-rootfs.tar.gz" ]; then
-           echo "File berhasil diunduh."
-           ls -lh build_dir/openwrt-armsr/
-        else
-           echo "Gagal mengunduh file!"
-           exit 1
-        fi
+        echo "Isi folder openwrt-armsr:"
+        ls -lh build_dir/openwrt-armsr/
 
     - name: Build Firmware
       id: build_firmware
       run: |
         cd build_dir
         sudo chmod +x remake
-        # Gunakan sudo -E untuk menjaga environment
+        # Menjalankan build. Kita arahkan output log ke file agar bisa dicek jika gagal
         sudo -E ./remake -b "${{ github.event.inputs.openwrt_target }}" -k "${{ github.event.inputs.openwrt_kernel }}"
-        echo "status=success" >> $GITHUB_OUTPUT
+        
+        # Cek apakah folder out tercipta
+        if [ -d "out" ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "FAILED: Folder 'out' tidak ditemukan setelah build!"
+          exit 1
+        fi
 
     - name: Simpan Hasil Build
       if: steps.build_firmware.outputs.status == 'success'
       run: |
         mkdir -p deploy
-        # Cari file .img.gz hasil build dan pindahkan ke folder deploy
+        # Cari file img.gz di folder build_dir/out
         find build_dir/out -name "*.img.gz" -exec cp {} deploy/ \;
+        
+        # Cek jika file berhasil dipindah
+        if [ -z "$(ls -A deploy)" ]; then
+           echo "Gagal menemukan file .img.gz di folder out!"
+           exit 1
+        fi
         echo "FIRMWARE_NAME=$(ls deploy | head -n 1)" >> $GITHUB_ENV
 
     - name: Upload Ke Artifact
